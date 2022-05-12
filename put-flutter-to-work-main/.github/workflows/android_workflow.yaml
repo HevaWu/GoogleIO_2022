@@ -1,0 +1,65 @@
+name: Android CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/android_workflow.yaml
+      - newsfeed_android/**
+
+defaults:
+  run:
+    working-directory: ./newsfeed_android
+jobs:
+  build:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    name: build / ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+      - run: flutter --version
+
+      - name: Build Flutter AAR file
+        working-directory: flutter_nps
+        run: flutter build aar
+
+      - name: Set up JDK 1.8
+        uses: actions/setup-java@v1
+        with:
+          java-version: "17"
+
+      - name: Change wrapper permissions
+        working-directory: ./newsfeed_android
+        run: chmod +x ./gradlew
+
+      - name: Android linter
+        run: ./gradlew lint
+        continue-on-error: false
+
+      - name: Run Checkstyle
+        uses: dbelyaev/action-checkstyle@v0.5.1
+        if: matrix.platform == 'ubuntu-latest'
+        with:
+          github_token: ${{ secrets.github_token }}
+
+      - name: Build with Gradle
+        run: ./gradlew build
+
+      - name: Run Android Unit Test
+        run: ./gradlew testDebugUnitTest
+
+      - name: Run Android Instrumented tests
+        if: matrix.platform == 'macos-latest'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          working-directory: ./newsfeed_android
+          api-level: 29
+          script: ./gradlew connectedCheck
